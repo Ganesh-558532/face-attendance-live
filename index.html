@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Attendance Photo App</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <div class="container">
+        <h1>Face Recognition Attendance App</h1>
+
+        <div class="controls">
+            <input type="text" id="studentName" placeholder="Enter student name..." required>
+            
+                        <input type="file" id="imageUpload" accept="image/*" multiple>
+
+            <button id="startCameraBtn">Start Camera</button>
+            <button id="takePhotoBtn">Capture from Camera</button>
+        </div>
+
+        <div class="camera-section">
+            <video id="videoFeed" autoplay></video>
+            <canvas id="photoCanvas" style="display:none;"></canvas>
+        </div>
+
+        <div class="students-container" id="studentList">
+            <h2>Captured Students</h2>
+            </div>
+        
+    </div>
+
+    <script src="face-api.min.js"></script>
+    <script src="script.js"></script>
+    
+</body>
+</html>
