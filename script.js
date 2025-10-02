@@ -1,20 +1,45 @@
 // =========================================================================
-// 1. HTML Elements and Variable Declarations
+// 1. HTML Elements and Variable Declarations (No change needed)
 // =========================================================================
 
 const startCameraBtn = document.getElementById('startCameraBtn');
 const takePhotoBtn = document.getElementById('takePhotoBtn');
 const videoFeed = document.getElementById('videoFeed');
 const photoCanvas = document.getElementById('photoCanvas');
-const studentNameInput = document.getElementById('studentName');
+const studentNameInput = document.getElementById('studentNameInput');
 const studentList = document.getElementById('studentList');
-
-// NEW: File Upload Reference
 const imageUpload = document.getElementById('imageUpload');
+const imagePreview = document.getElementById('imagePreview');
 
-// Attendance button and result display elements are created dynamically
+// NEW LOGIN/CLASS VARIABLES
+const loginScreen = document.getElementById('loginScreen');
+const mainApp = document.getElementById('mainApp');
+const classNameInput = document.getElementById('classNameInput');
+const passwordInput = document.getElementById('passwordInput');
+const loginBtn = document.getElementById('loginBtn');
+const loginMessage = document.getElementById('loginMessage');
+
+let CURRENT_CLASS_ID = null; 
+let stream = null; 
+let labeledFaceDescriptors = []; 
+const DISTANCE_THRESHOLD = 0.7; 
+
+// New State: To track if an image is staged for saving from file
+let stagedImageForEnrollment = null; 
+let originalTakePhotoBtnText = 'Capture from Camera';
+
+
+// Hardcoded Class Credentials (No change needed)
+const CLASS_CREDENTIALS = {
+    "BCA_1": "bca1pass",
+    "BCA_2": "bca2pass",
+    "MCA_1": "mca1pass"
+};
+
+
+// Attendance button and result display elements (No change needed)
 const markAttendanceBtn = document.createElement('button');
-markAttendanceBtn.textContent = 'Mark Attendance (from Camera/File)'; // Translated
+markAttendanceBtn.textContent = 'Mark Attendance (from Camera/File)'; 
 markAttendanceBtn.id = 'markAttendanceBtn';
 markAttendanceBtn.style.display = 'none'; 
 const controlsDiv = document.querySelector('.controls');
@@ -29,18 +54,14 @@ if (containerDiv) {
     containerDiv.appendChild(attendanceResult);
 }
 
-let stream = null; 
-let labeledFaceDescriptors = []; 
-const DISTANCE_THRESHOLD = 0.7; 
-
 
 // =========================================================================
-// 2. Models Load And Setup
+// 2. Models Load And Setup (No change needed)
 // =========================================================================
 
 async function loadModels() {
     if (attendanceResult) {
-        attendanceResult.textContent = "Models loading... please wait."; // Translated
+        attendanceResult.textContent = "Models loading... please wait.";
     }
     
     try {
@@ -49,26 +70,44 @@ async function loadModels() {
         await faceapi.nets.faceRecognitionNet.loadFromUri('./models');
         
         if (attendanceResult) {
-            attendanceResult.textContent = "Models loaded successfully! ✅"; // Translated
-        }
-        if (markAttendanceBtn) {
-            markAttendanceBtn.style.display = 'inline-block'; 
+            attendanceResult.textContent = "Models loaded successfully! ✅";
         }
     } catch (error) {
         console.error("Error loading face-api models. Check ./models folder and file integrity:", error);
         if (attendanceResult) {
-            attendanceResult.textContent = "ERROR: Models failed to load. Check console and files. (Live Server required)"; // Translated
+            attendanceResult.textContent = "ERROR: Models failed to load. Check console and files. (Live Server required)";
         }
     }
 }
 
+// =========================================================================
+// 3. Functions (Login/Data/Core Logic)
+// =========================================================================
 
-// =========================================================================
-// 3. Functions (unchanged logic)
-// =========================================================================
+// Utility to clear video stream and staged image preview (No change needed)
+function clearCameraAndPreview() {
+    // Stops the camera stream
+    if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+    }
+    videoFeed.srcObject = null;
+    
+    // Reset video styling
+    videoFeed.style.transform = 'scale(1.0)'; 
+    videoFeed.style.objectFit = 'contain';
+
+    // Hides elements
+    videoFeed.style.display = 'none';
+    takePhotoBtn.style.display = 'none';
+    imagePreview.style.display = 'none';
+    imagePreview.src = '';
+    
+    // Resets state variables
+    stagedImageForEnrollment = null;
+    takePhotoBtn.textContent = originalTakePhotoBtnText;
+}
 
 function displayStudent(name, photo) {
-    // ... (unchanged display logic)
     if (!studentList) return; 
     const card = document.createElement('div');
     card.classList.add('student-card');
@@ -83,13 +122,19 @@ function displayStudent(name, photo) {
     studentList.appendChild(card);
 }
 
+// Loads data based on CURRENT_CLASS_ID (No change needed)
 async function loadStudents() {
-    // ... (unchanged loadStudents logic)
     labeledFaceDescriptors = []; 
-    let students = JSON.parse(localStorage.getItem('students')) || [];
+    
+    if (!CURRENT_CLASS_ID) {
+        if (studentList) studentList.innerHTML = '<h2>Please Login to see students</h2>';
+        return;
+    }
+    
+    let students = JSON.parse(localStorage.getItem(CURRENT_CLASS_ID)) || [];
     
     if (studentList) { 
-        studentList.innerHTML = '<h2>Captured Students</h2>'; 
+        studentList.innerHTML = `<h2>Captured Students - ${CURRENT_CLASS_ID}</h2>`;
     }
 
     students.forEach(student => {
@@ -110,155 +155,271 @@ async function loadStudents() {
     });
 }
 
-
+// Saves data using CURRENT_CLASS_ID (No change needed)
 function saveStudent(name, photo, descriptor) {
-    // ... (unchanged saveStudent logic)
-    let students = JSON.parse(localStorage.getItem('students')) || [];
+    if (!CURRENT_CLASS_ID) {
+        alert("Error: Please login to a class first!");
+        return;
+    }
+    let classData = JSON.parse(localStorage.getItem(CURRENT_CLASS_ID)) || [];
+    
     const descriptorArray = Array.from(descriptor); 
     
-    students.push({ name: name, photo: photo, descriptor: descriptorArray });
-    localStorage.setItem('students', JSON.stringify(students));
-    displayStudent(name, photo); 
-
+    classData.push({ name: name, photo: photo, descriptor: descriptorArray });
+    localStorage.setItem(CURRENT_CLASS_ID, JSON.stringify(classData));
+    
     loadStudents(); 
 }
 
+
+// Core Face Detection/Descriptor Extraction logic (Optimized for Canvas/Image loading)
+async function processAndSaveFace(mediaElement, studentName) {
+    return new Promise(async (resolve) => {
+        
+        // Show processing image visually
+        videoFeed.style.display = 'none';
+        imagePreview.style.display = 'block';
+        
+        // Create temporary canvas for robust drawing and tensor creation
+        const tempCanvas = document.createElement('canvas');
+        const tempCtx = tempCanvas.getContext('2d');
+        
+        // Wait for image/media to be fully loaded before drawing to avoid blank canvas/lag
+        await new Promise(r => {
+            if (mediaElement.complete || mediaElement.readyState >= 2 || mediaElement.tagName !== 'IMG') {
+                r();
+            } else {
+                mediaElement.onload = r;
+            }
+        });
+        
+        tempCanvas.width = mediaElement.naturalWidth || mediaElement.videoWidth || mediaElement.width || 600;
+        tempCanvas.height = mediaElement.naturalHeight || mediaElement.videoHeight || mediaElement.height || 400;
+        tempCtx.drawImage(mediaElement, 0, 0, tempCanvas.width, tempCanvas.height);
+        imagePreview.src = tempCanvas.toDataURL('image/png'); // Update source for visibility
+
+        const img = faceapi.tf.browser.fromPixels(tempCanvas); 
+        
+        const faceDetection = await faceapi.detectSingleFace(img)
+            .withFaceLandmarks()
+            .withFaceDescriptor();
+    
+        if (!faceDetection) {
+            alert(`No face detected in the image for ${studentName}. Please try again with a clearer photo.`);
+            img.dispose();
+            clearCameraAndPreview();
+            resolve();
+            return;
+        }
+    
+        const imageDataUrl = tempCanvas.toDataURL('image/png'); 
+        saveStudent(studentName, imageDataUrl, faceDetection.descriptor);
+        
+        alert(`Student ${studentName} successfully enrolled!`);
+        clearCameraAndPreview(); // Reset UI after success
+        
+        img.dispose();
+        resolve();
+    });
+}
+
 // =========================================================================
-// 4. Event Listeners (Modified for File Upload)
+// 4. Event Listeners (All Features)
 // =========================================================================
 
 document.addEventListener('DOMContentLoaded', () => {
+    // Initial setup: Loads models, sets up login/main app view
     loadModels();
-    loadStudents();
+    if (loginScreen) {
+        loginScreen.style.display = 'block';
+        mainApp.style.display = 'none';
+    } else {
+        loadStudents(); 
+    }
 });
 
-// Camera on event (same logic)
+
+// *** LOGIN BUTTON LOGIC *** (No change needed)
+if (loginBtn) {
+    loginBtn.addEventListener('click', () => {
+        const classId = classNameInput.value.trim().toUpperCase(); 
+        const password = passwordInput.value.trim();
+        
+        if (CLASS_CREDENTIALS[classId] === password) {
+            CURRENT_CLASS_ID = classId;
+            loginMessage.textContent = `Success! Logged in as ${classId}.`;
+            loginMessage.style.color = 'green';
+            
+            loginScreen.style.display = 'none'; 
+            mainApp.style.display = 'block'; 
+
+            if (markAttendanceBtn) {
+                 markAttendanceBtn.style.display = 'inline-block';
+            }
+            
+            loadStudents(); 
+
+        } else {
+            loginMessage.textContent = 'Login failed. Check Class Name and Password.';
+            loginMessage.style.color = 'red';
+        }
+    });
+}
+
+
+// *** UPDATED: Back Camera/Environment Facing & Flexibility/Zoom *** (No change needed)
 startCameraBtn.addEventListener('click', () => {
-    navigator.mediaDevices.getUserMedia({ video: true })
+    if (!CURRENT_CLASS_ID) {
+        alert("Please login to a class first!");
+        return;
+    }
+    clearCameraAndPreview(); 
+    
+    videoFeed.style.display = 'block';
+
+    navigator.mediaDevices.getUserMedia({ 
+        video: {
+            facingMode: 'environment', 
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+            resizeMode: 'crop-and-scale' 
+        }
+    })
         .then(videoStream => {
             stream = videoStream;
             videoFeed.srcObject = stream;
             videoFeed.play();
             takePhotoBtn.style.display = 'inline-block'; 
-            takePhotoBtn.textContent = 'Capture from Camera'; // Re-confirm button text
+            takePhotoBtn.textContent = originalTakePhotoBtnText;
+            
+            videoFeed.style.transform = 'scale(1.1)'; 
+            videoFeed.style.objectFit = 'cover';
         })
         .catch(err => {
-            console.error("Camera access error: ", err); // Translated
-            alert("Camera access denied. Please check permissions."); // Translated
+            console.error("Camera access error: ", err);
+            alert("Camera access denied or device not found."); 
         });
 });
 
 
-// ENROLLMENT LOGIC (Now handles both Camera and File Upload)
+// *** ENROLLMENT/SAVE LOGIC (Handles Camera Capture OR Staged File) ***
 takePhotoBtn.addEventListener('click', async () => {
     const studentName = studentNameInput.value.trim();
     if (!studentName) {
-        alert("Please enter the student's name first!"); // Translated
+        alert("Please enter the student's name first!"); 
+        return;
+    }
+    if (!CURRENT_CLASS_ID) {
+        alert("Please login to a class first!");
         return;
     }
 
-    // --- LOGIC FOR CAMERA CAPTURE ---
-    const context = photoCanvas.getContext('2d');
-    photoCanvas.width = videoFeed.videoWidth;
-    photoCanvas.height = videoFeed.videoHeight;
-    context.drawImage(videoFeed, 0, 0, photoCanvas.width, photoCanvas.height);
+    if (stagedImageForEnrollment) {
+        // --- LOGIC FOR SAVING STAGED FILE (Use staged image) ---
+        await processAndSaveFace(stagedImageForEnrollment, studentName);
+        studentNameInput.value = '';
+        imageUpload.value = null; // Clear file input
+        
+    } else {
+        // --- LOGIC FOR CAMERA CAPTURE (Capture current video frame) ---
+        
+        if (videoFeed.srcObject === null || videoFeed.style.display === 'none') {
+            alert("Camera stream is not running. Please click 'Start Camera' first.");
+            return;
+        }
+        
+        // Step 1: Capture frame onto canvas
+        const context = photoCanvas.getContext('2d');
+        photoCanvas.width = videoFeed.videoWidth;
+        photoCanvas.height = videoFeed.videoHeight;
+        context.drawImage(videoFeed, 0, 0, photoCanvas.width, photoCanvas.height);
 
-    const capturedImage = photoCanvas; 
-    await processAndSaveFace(capturedImage, studentName);
+        // Step 2: Process canvas image
+        const capturedImage = photoCanvas;
+        await processAndSaveFace(capturedImage, studentName);
+    }
 });
 
 
-// NEW: FILE UPLOAD Enrollment/Attendance Trigger (on change event)
+// *** FILE UPLOAD Preview and Staging ***
 imageUpload.addEventListener('change', async (event) => {
-    const files = event.target.files;
-
-    if (!files.length) {
-        return;
-    }
+    
+    clearCameraAndPreview();
+    
+    const files = event.target.files;
+    if (!files.length) return;
     
-    // Check if the studentName is entered for enrollment (using the first file)
-    const studentName = studentNameInput.value.trim();
-    const isEnrollment = studentName && files.length === 1;
+    const file = files[0];
+    
+    // Read file data for preview and staging (Using a Promise to ensure the image loads)
+    const reader = new FileReader();
+    
+    reader.onload = async function(e) {
+        // Create an Image object to load the data URL
+        const img = new Image();
+        img.onload = () => {
+            // Display preview
+            imagePreview.style.display = 'block';
+            imagePreview.src = img.src;
 
-    if (isEnrollment) {
-        // --- LOGIC FOR FILE ENROLLMENT ---
-        const file = files[0];
-        const img = await faceapi.bufferToImage(file); // Load the file into an image element
-        
-        await processAndSaveFace(img, studentName);
-        
-        // Clear inputs after successful enrollment
-        studentNameInput.value = '';
-        imageUpload.value = null; 
+            // Stage the image object for processing upon clicking the SAVE button
+            stagedImageForEnrollment = img;
+            
+            // Update UI if in Enrollment Mode (Name is entered)
+            if (studentNameInput.value.trim()) {
+                takePhotoBtn.style.display = 'inline-block';
+                takePhotoBtn.textContent = 'Save Selected Image'; 
+            } else if (files.length > 0) {
+                // Attendance mode: Files are selected, prompt user to click the attendance button
+                alert(`Selected ${files.length} file(s). Now click 'Mark Attendance' button.`);
+            }
+        };
+        img.src = e.target.result; // Start loading the image data
 
-    } else if (files.length > 0) {
-        // Attendance mode: Files are selected, now prompt user to click the attendance button
-        alert(`Selected ${files.length} file(s). Now click 'Mark Attendance' button.`);
-    }
+    };
+    reader.readAsDataURL(file); // Reads the file data as a URL
 });
 
 
-// Reusable function to process image/canvas and save face
-async function processAndSaveFace(mediaElement, studentName) {
-    let img;
-    // faceapi.nets.loadFromUri accepts HTML elements directly, but for canvas/image element, 
-    // we should create a tensor first for consistent descriptor extraction
-    
-    // We create a temporary canvas to draw the media element for consistent tensor conversion
-    const tempCanvas = document.createElement('canvas');
-    const tempCtx = tempCanvas.getContext('2d');
-    tempCanvas.width = mediaElement.naturalWidth || mediaElement.videoWidth || mediaElement.width;
-    tempCanvas.height = mediaElement.naturalHeight || mediaElement.videoHeight || mediaElement.height;
-    tempCtx.drawImage(mediaElement, 0, 0, tempCanvas.width, tempCanvas.height);
-
-    img = faceapi.tf.browser.fromPixels(tempCanvas);
-    
-    const faceDetection = await faceapi.detectSingleFace(img)
-        .withFaceLandmarks()
-        .withFaceDescriptor();
-
-    if (!faceDetection) {
-        alert("No face detected in the image/camera feed. Please try again."); // Translated
-        img.dispose();
-        return;
-    }
-
-    const imageDataUrl = tempCanvas.toDataURL('image/png'); 
-    saveStudent(studentName, imageDataUrl, faceDetection.descriptor);
-    img.dispose();
-}
-
-
-// ATTENDANCE LOGIC (Now handles files if selected)
+// ATTENDANCE LOGIC (Handles File/Camera)
 if (markAttendanceBtn) {
     markAttendanceBtn.addEventListener('click', async () => {
-        if (labeledFaceDescriptors.length === 0) {
-            alert("Please capture student photos and descriptors first!"); // Translated
+        if (!CURRENT_CLASS_ID) {
+            alert("Please login to a class first!");
             return;
         }
 
-        let attendanceSource = videoFeed; // Default to video feed
-
-        const files = imageUpload.files;
-        if (files.length > 0) {
-            // --- LOGIC FOR FILE ATTENDANCE ---
-            const file = files[0];
-            attendanceSource = await faceapi.bufferToImage(file); // Load file into Image element
-        }
-
+        if (labeledFaceDescriptors.length === 0) {
+            alert(`No student data found for ${CURRENT_CLASS_ID}! Please enroll students first.`);
+            return;
+        }
+        
+        // Determine source: Staged image preview OR live video feed
+        let attendanceSource;
+        if (imagePreview.style.display === 'block' && imagePreview.src) {
+            // Use the displayed image for attendance (from file upload)
+            attendanceSource = imagePreview;
+        } else {
+            // Use the live video feed (if running)
+            if (videoFeed.srcObject === null || videoFeed.style.display === 'none') {
+                alert("Please start the camera or select an image file to mark attendance.");
+                return;
+            }
+            // Capture video frame onto canvas for detection
+            const context = photoCanvas.getContext('2d');
+            photoCanvas.width = videoFeed.videoWidth;
+            photoCanvas.height = videoFeed.videoHeight;
+            context.drawImage(videoFeed, 0, 0, photoCanvas.width, photoCanvas.height);
+            attendanceSource = photoCanvas;
+        }
+        
+        
+        // ... (rest of the matching and recognition logic is fine)
         const faceMatcher = new faceapi.FaceMatcher(labeledFaceDescriptors, DISTANCE_THRESHOLD);
 
-        // Detect faces from the loaded image or videoFeed
         const results = await faceapi.detectAllFaces(attendanceSource)
             .withFaceLandmarks()
             .withFaceDescriptors();
-
-        // If attendanceSource was a file image, we dispose of it's memory after detection
-        if (files.length > 0) {
-             // In browser environments, dispose is typically only needed for Tensors, 
-             // but to be safe, we release resources if possible.
-             // We'll rely on face-api's internal memory management for the image tensor.
-        }
 
         let presentStudents = new Set();
         
@@ -273,15 +434,12 @@ if (markAttendanceBtn) {
         if (attendanceResult) {
             if (presentStudents.size > 0) {
                 const names = Array.from(presentStudents).join(', ');
-                attendanceResult.innerHTML = `**Present Students (${presentStudents.size}):** ${names} ✅`; // Translated
+                attendanceResult.innerHTML = `**Present Students (${presentStudents.size}):** ${names} ✅`;
             } else {
-                attendanceResult.innerHTML = "No recognized face found. 😞"; // Translated
+                attendanceResult.innerHTML = "No recognized face found. 😞";
             }
         }
-        
-        // Clear files selection after attendance
-        imageUpload.value = null;
+        
+        clearCameraAndPreview(); // Clear preview and stop camera after attendance
     });
 }
-
-// ... (loadStudents and saveStudent remain the same)
