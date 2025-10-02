@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Class Attendance System</title>
+        <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <div class="container">
+        
+                <div id="loginScreen">
+            <h2>Select Class & Login</h2>
+            <input type="text" id="classNameInput" placeholder="Enter Class Name (e.g., BCA_1)" required>
+            <input type="password" id="passwordInput" placeholder="Enter Password" required>
+            <button id="loginBtn">Login</button>
+            <p id="loginMessage" style="color: red; margin-top: 10px;"></p>
+        </div>
+
+                <div id="mainApp" style="display: none;">
+            
+            <h1>Face Recognition Attendance App</h1>
+
+            <div class="controls">
+                                <input type="text" id="studentNameInput" placeholder="Enter student name..." required> 
+                <input type="file" id="imageUpload" accept="image/*" multiple>
+
+                                <button id="startCameraBtn">Start Camera (Back/Env)</button>
+                <button id="takePhotoBtn">Capture from Camera</button>
+            </div>
+    
+            <div class="camera-section">
+                <video id="videoFeed" autoplay></video>
+                <canvas id="photoCanvas" style="display:none;"></canvas>
+                <img id="imagePreview" style="display:none; width:100%; max-width:600px; border-radius: 5px;" alt="Selected Image Preview">
+            </div>
+    
+            <div class="students-container" id="studentList">
+                <h2>Captured Students</h2>
+            </div>
+        </div> 
+        
+    </div>
+
+        <script src="face-api.min.js"></script>
+    <script src="script.js"></script>
+    
+</body>
+</html>
